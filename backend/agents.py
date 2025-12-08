@@ -11,7 +11,7 @@ from utils import extract_tables_from_pdf, extract_text_from_pdf, extract_data_f
 # --- SETUP & MARKET DATA ---
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-pro-latest')
+model = genai.GenerativeModel('gemini-2.5-flash-lite')
 MARKET_DATA = {
     "APAC Food Delivery Sector Growth (YoY)": {"value": "27%", "source": "Q3 2024 Food Delivery Market Report"},
     "Global Quick Commerce Growth (YoY)": {"value": "85%", "source": "Global Commerce Analytics, FY24 Review"},
