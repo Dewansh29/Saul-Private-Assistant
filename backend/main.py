@@ -5,9 +5,12 @@ from pydantic import BaseModel
 from typing import List
 import traceback
 import io
+import requests
+import json
 
 from agents import analysis_app, report_app, scenario_app, benchmark_app, AgentState
 from utils import create_word_report
+from rag_engine import retriever
 
 app = FastAPI(
     title="Saul Goodman: Financial Strategy API",
@@ -22,8 +25,99 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ==========================================
+# --- TEST ROUTES ---
+# ==========================================
+
+@app.get("/test-rag")
+def test_rag_pipeline():
+    """Tests the new local embedding and vector database setup."""
+    sample_financial_text = """
+    In Q3 2023, The Company saw a massive surge in revenue, hitting $450 million. 
+    However, employee benefit expenses also rose sharply to $120 million due to aggressive hiring in the APAC region.
+    The board is concerned about the debt-to-equity ratio standing at 1.5, suggesting high leverage.
+    """
+    
+    # 1. Ingest the text (CPU Embeddings + ChromaDB + BM25)
+    retriever.ingest_text(sample_financial_text, "TestCorp")
+    
+    # 2. Perform a Hybrid Search
+    answer_context = retriever.hybrid_search("What were the employee benefit expenses?")
+    
+    return {"retrieved_context": answer_context}
+
+@app.get("/")
+def health_check():
+    return {"status": "Backend Online. Ready to process."}
+
+@app.get("/ping-ollama")
+def ping_ollama():
+    """Tests the connection to your local Llama 3.2."""
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "llama3.2", 
+                "prompt": "You are Saul Goodman. Give me a one-sentence piece of aggressive financial advice.",
+                "stream": False
+            }
+        )
+        if response.status_code == 200:
+            return {
+                "status": "Success", 
+                "saul_says": response.json().get("response")
+            }
+        return {"status": "Failed", "details": response.text}
+    except Exception as e:
+        return {"error": f"Could not connect to Ollama. Details: {str(e)}"}
+
+# ==========================================
+# --- CORE API ROUTES ---
+# ==========================================
+
+@app.post("/analyze-stream")
+async def analyze_stream(file: UploadFile = File(...)):
+    """Streams the LangGraph execution node-by-node to the frontend via Server-Sent Events."""
+    file_bytes = await file.read()
+    
+    async def event_stream():
+        # Initialize the state for LangGraph
+        initial_state = AgentState(
+            raw_file_bytes=file_bytes, 
+            filename=file.filename,
+            company_name="The Company",
+            debate=[]
+        )
+        
+        try:
+            # LangGraph's .stream() yields data every time a node finishes its task!
+            for output in analysis_app.stream(initial_state):
+                node_name = list(output.keys())[0]
+                state_update = output[node_name]
+                
+                # Create a clean package to send to the React frontend
+                payload = {
+                    "node": node_name,
+                    "company_name": state_update.get("company_name"),
+                    "latest_debate": state_update.get("debate", [])[-1] if state_update.get("debate") else None,
+                    "kpis": state_update.get("cleaned_data") if node_name in ["pdf_analyzer", "excel_analyzer"] else None,
+                    "summary": state_update.get("final_summary") if node_name == "summary" else None
+                }
+                
+                # Yield the package in SSE format (data: {...}\n\n)
+                yield f"data: {json.dumps(payload, default=str)}\n\n"
+                
+        except Exception as e:
+            print(f"Streaming Error: {e}")
+            error_payload = {"node": "error", "message": str(e)}
+            yield f"data: {json.dumps(error_payload)}\n\n"
+            
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/analyze")
 async def analyze_report_for_display(file: UploadFile = File(...)):
+    """Legacy route: Waits for the entire process to finish before returning."""
     try:
         file_bytes = await file.read()
         initial_state = AgentState(raw_file_bytes=file_bytes, debate=[], filename=file.filename)
@@ -42,12 +136,11 @@ async def analyze_report_for_display(file: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- CHANGE: Simplified ReportRequest to use cleaned_data ---
 class ReportRequest(BaseModel):
     company_name: str
     debate: List[str]
     final_summary: str
-    cleaned_data: str # Use the KPI data directly
+    cleaned_data: str
 
 class ScenarioRequest(BaseModel):
     analysis_context: str
@@ -59,17 +152,15 @@ class BenchmarkRequest(BaseModel):
     company_name: str
     cleaned_data: str
 
-# --- CHANGE: Overhauled the download endpoint for reliability ---
 @app.post("/download_report")
 async def download_detailed_report(request: ReportRequest):
     try:
         print("--- Generating Word Report ---")
         
-        # We no longer run a separate workflow. We just format the data we already have.
         full_report_data = {
             "debate": request.debate,
             "final_summary": request.final_summary,
-            "cleaned_data": request.cleaned_data # Pass the KPIs to the report creator
+            "cleaned_data": request.cleaned_data
         }
         
         report_stream = create_word_report(full_report_data, request.company_name)
