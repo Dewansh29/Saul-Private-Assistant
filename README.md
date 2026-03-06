@@ -13,7 +13,7 @@ Upload a financial document and watch three AI personas — an **Optimist CEO**,
 | Layer | Technology |
 |---|---|
 | **Frontend** | React 19, Vite, TailwindCSS, Axios, React Router |
-| **Backend** | Python, FastAPI, Uvicorn |
+| **Backend** | Python, FastAPI, Uvicorn, Rag, Agentic ai |
 | **AI Core** | Google Gemini 2.5 Flash Lite |
 | **Orchestration** | LangGraph (multi-agent state machine) |
 | **Data Processing** | Pandas, PyMuPDF, Camelot, OpenPyXL |
