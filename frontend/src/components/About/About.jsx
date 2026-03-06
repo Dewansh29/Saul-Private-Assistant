@@ -69,10 +69,10 @@ function About() {
         <section className={styles.section}>
           <h2>Team</h2>
           <ul className={styles.teamList}>
-            <li><a href="https://www.linkedin.com/in/jangraxmohit/" target="_blank" rel="noopener noreferrer">Mohit</a></li>
+            {/* <li><a href="https://www.linkedin.com/in/jangraxmohit/" target="_blank" rel="noopener noreferrer">Mohit</a></li> */}
             <li><a href="https://www.linkedin.com/in/dewansh-jha-1a0917295/" target="_blank" rel="noopener noreferrer">Dewansh Jha</a></li>
-            <li><a href="https://www.linkedin.com/in/vineet-sood-82bb23297/" target="_blank" rel="noopener noreferrer">Vineet Sood</a></li>
-            <li><a href="https://www.linkedin.com/in/ankush-chaudhary-758017277/" target="_blank" rel="noopener noreferrer">Ankush Chaudhary</a></li>
+            {/* <li><a href="https://www.linkedin.com/in/vineet-sood-82bb23297/" target="_blank" rel="noopener noreferrer">Vineet Sood</a></li>
+            <li><a href="https://www.linkedin.com/in/ankush-chaudhary-758017277/" target="_blank" rel="noopener noreferrer">Ankush Chaudhary</a></li> */}
           </ul>
         </section>
       </div>

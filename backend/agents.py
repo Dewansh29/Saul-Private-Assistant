@@ -16,10 +16,7 @@ from utils import extract_tables_from_pdf, extract_text_from_pdf, extract_data_f
 llm_strict = OllamaLLM(model="llama3.2", temperature=0.0)
 llm_creative = OllamaLLM(model="llama3.2", temperature=0.6)
 
-MARKET_DATA = {
-    "APAC Food Delivery Sector Growth (YoY)": {"value": "27%", "source": "Q3 2024 Food Delivery Market Report"},
-    "Global Quick Commerce Growth (YoY)": {"value": "85%", "source": "Global Commerce Analytics, FY24 Review"},
-}
+
 
 # --- AGENT STATE ---
 class AgentState(dict):
@@ -306,9 +303,11 @@ def realist_agent(state: AgentState) -> AgentState:
     prompt = f"""
     You are the pragmatic, data-driven CFO of {company}.
     Provide a grounded, highly detailed financial analysis. Write at least 3 substantial paragraphs.
-    You must calculate margins or ratios if possible using the hard data.
+    
+    CRITICAL INSTRUCTION FOR MISSING DATA: 
+    Review the HARD FINANCIAL DATA. If any metrics (like Revenue or Profit) are 'null' or missing, YOU MUST NOT complain, apologize, or state that the data is missing. A real CFO never makes excuses. Instead, seamlessly pivot your analysis to focus on the metrics that ARE present (e.g., Assets, Liabilities, Employee Costs, Cash) and rely heavily on the QUALITATIVE CONTEXT to assess operational efficiency and capital management.
 
-    MANDATORY CITATIONS: You MUST cite the specific page numbers for your claims. The RAG context includes tags like [SOURCE: Page X]. Always include the page number in your text, for example: "Gross margin remained stable (Page 12)."
+    MANDATORY CITATIONS: You MUST cite the specific page numbers for your claims. The RAG context includes tags like [SOURCE: Page X]. Always include the page number in your text, for example: "Operating costs were optimized (Page 12)."
     
     HARD FINANCIAL DATA:
     {kpis}
@@ -318,7 +317,7 @@ def realist_agent(state: AgentState) -> AgentState:
     {rag_context}
     ---
 
-    Synthesize the hard numbers with the operational realities, cost management, and capital allocation strategies mentioned in the text. Be objective.
+    Synthesize the hard numbers with the operational realities and capital allocation strategies mentioned in the text. Be objective. Calculate ratios ONLY if the required numbers are explicitly provided.
     """
     response = llm_strict.invoke(prompt)
     state['realist_response'] = response.strip()
@@ -378,6 +377,8 @@ def comprehensive_analysis_agent(state: AgentState) -> AgentState:
     print("---COMPREHENSIVE ANALYSIS COMPLETE---")
     return state
 
+
+
 def scenario_agent(state: AgentState) -> AgentState:
     print("\n---EXECUTING SCENARIO AGENT (WITH RAG)---")
     user_query = state.get('user_query', "No query provided.")
@@ -388,22 +389,25 @@ def scenario_agent(state: AgentState) -> AgentState:
     rag_context = retriever.hybrid_search(user_query, top_k=3)
 
     prompt = f"""
-    You are a financial modeling expert for {company_name}.
-    Given a JSON object of key financial data, RAG context, and a "what-if" question, calculate the potential impact.
-    Show your step-by-step calculation and provide a clear, concise conclusion.
+    You are a razor-sharp Financial Modeling Expert for {company_name}.
+    The user is proposing a hypothetical "what-if" scenario. Your job is to calculate the potential financial impact.
 
-    KEY FINANCIAL DATA:
+    CRITICAL INSTRUCTIONS:
+    1. Look at the HARD FINANCIAL DATA. Identify the current numbers relevant to the scenario. If a specific number is 'null' or missing, DO NOT crash or complain. Clearly state a reasonable assumption based on the HISTORICAL CONTEXT to fill the gap.
+    2. Perform the step-by-step mathematical calculation. Show your work clearly.
+    3. Provide a brutal, bottom-line conclusion on how this impacts the company's health or leverage.
+    
+    HARD FINANCIAL DATA:
     ---
     {cleaned_data}
     ---
     
-    HISTORICAL CONTEXT:
+    HISTORICAL CONTEXT (For reference & precedents):
     ---
     {rag_context}
     ---
 
-    USER'S SCENARIO:
-    "{user_query}"
+    USER'S SCENARIO: "{user_query}"
     """
     response = llm_strict.invoke(prompt)
     state['scenario_response'] = response.strip()
@@ -411,26 +415,74 @@ def scenario_agent(state: AgentState) -> AgentState:
     return state
 
 def benchmark_agent(state: AgentState) -> AgentState:
-    print("\n---EXECUTING BENCHMARK AGENT---")
+    print("\n---EXECUTING BENCHMARK AGENT (MULTI-DOC RAG)---")
+    company = state.get('company_name', 'The Company')
+    kpis = state.get('cleaned_data', '{}')
+    
+    # We pass the competitor's name via the user_query variable
+    competitor = state.get('user_query', 'Industry Competitors')
+
+    # Query the RAG engine specifically for the competitor's data
+    rag_query = f"What is the revenue, profit, market share, and strategic growth of {competitor}?"
+    competitor_context = retriever.hybrid_search(rag_query, top_k=4)
+
     prompt = f"""
-    You are a market analyst. Compare {state['company_name']}'s financial data with the provided market benchmarks.
-    Provide a bulleted list of insights, citing the source for each benchmark.
-    Ground your comparison in the company's specific numbers.
-
-    Company KPIs:
-    ---
-    {state['cleaned_data']}
-    ---
-
-    Market Benchmarks:
-    ---
-    {str(MARKET_DATA)}
-    ---
+    You are an elite, ruthless Market Analyst benchmarking {company} against {competitor}.
+    
+    CRITICAL RULES - READ CAREFULLY:
+    1. DO NOT APOLOGIZE. DO NOT say "Unfortunately," "I couldn't access," or "Based on available data."
+    2. DO NOT mention if data is missing or incomplete. Never break character.
+    3. If exact numbers for the competitor are missing from the text below, IGNORE the numbers and ruthlessly compare their STRATEGY and POSITIONING using whatever text IS available.
+    4. Provide a bulleted list of competitive advantages and disadvantages for {company}.
+    5. Cite [SOURCE: Page X] for the competitor data.
+    
+    Company KPIs ({company}):
+    {kpis}
+    
+    Competitor Data ({competitor}):
+    {competitor_context}
     """
     response = llm_strict.invoke(prompt)
     state['benchmark_analysis'] = response.strip()
     print("---BENCHMARK ANALYSIS COMPLETE---")
     return state
+
+def compliance_agent(state: AgentState) -> AgentState:
+    print("\n---EXECUTING SEC/COMPLIANCE RISK AGENT---")
+    company = state.get('company_name', 'The Company')
+    
+    # We deliberately query for the scariest terms in finance
+    rag_query = "What are the auditor qualifications, material weaknesses, regulatory actions, pending litigations, or going concern warnings?"
+    rag_context = retriever.hybrid_search(rag_query, top_k=4)
+
+    prompt = f"""
+    You are a strict SEC Compliance Officer and Risk Auditor analyzing {company}.
+    Your job is to read the provided context and extract a high-priority alert list of legal threats, auditor remarks, and regulatory risks.
+    
+    CRITICAL INSTRUCTIONS:
+    1. Output a clear, bulleted list of severe risks.
+    2. MANDATORY CITATIONS: You MUST cite the [SOURCE: Page X] for every single bullet point.
+    3. If no major risks are found, state "No material compliance risks found in the retrieved context."
+    4. Do not include introductory or concluding fluff. Just give me the alerts.
+    
+    REPORT CONTEXT:
+    ---
+    {rag_context}
+    ---
+    """
+    response = llm_strict.invoke(prompt)
+    
+    # We'll store this in analysis_context so we don't have to create a new state variable
+    state['analysis_context'] = response.strip() 
+    print("---COMPLIANCE CHECK COMPLETE---")
+    return state
+
+# --- Put this at the very bottom of agents.py with your other workflows ---
+compliance_workflow = StateGraph(AgentState)
+compliance_workflow.add_node("compliance_tracker", compliance_agent)
+compliance_workflow.set_entry_point("compliance_tracker")
+compliance_workflow.add_edge("compliance_tracker", END)
+compliance_app = compliance_workflow.compile()
 
 # --- WORKFLOW LOGIC ---
 def route_file_type(state: AgentState) -> str:

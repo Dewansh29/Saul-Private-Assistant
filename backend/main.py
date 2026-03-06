@@ -8,7 +8,7 @@ import io
 import requests
 import json
 
-from agents import analysis_app, report_app, scenario_app, benchmark_app, AgentState
+from agents import analysis_app, report_app, scenario_app, benchmark_app, compliance_app, AgentState
 from utils import create_word_report
 from rag_engine import retriever
 
@@ -32,14 +32,17 @@ app.add_middleware(
 @app.get("/test-rag")
 def test_rag_pipeline():
     """Tests the new local embedding and vector database setup."""
-    sample_financial_text = """
-    In Q3 2023, The Company saw a massive surge in revenue, hitting $450 million. 
-    However, employee benefit expenses also rose sharply to $120 million due to aggressive hiring in the APAC region.
-    The board is concerned about the debt-to-equity ratio standing at 1.5, suggesting high leverage.
-    """
     
-    # 1. Ingest the text (CPU Embeddings + ChromaDB + BM25)
-    retriever.ingest_text(sample_financial_text, "TestCorp")
+    # We now format the dummy text as a page dictionary so the engine can track page numbers
+    sample_pages = [
+        {
+            "page_num": 1, 
+            "text": "In Q3 2023, The Company saw a massive surge in revenue, hitting $450 million. However, employee benefit expenses also rose sharply to $120 million due to aggressive hiring in the APAC region. The board is concerned about the debt-to-equity ratio standing at 1.5, suggesting high leverage."
+        }
+    ]
+    
+    # 1. Ingest the text using the NEW page-based method
+    retriever.ingest_pages(sample_pages, "TestCorp")
     
     # 2. Perform a Hybrid Search
     answer_context = retriever.hybrid_search("What were the employee benefit expenses?")
@@ -151,6 +154,7 @@ class ScenarioRequest(BaseModel):
 class BenchmarkRequest(BaseModel):
     company_name: str
     cleaned_data: str
+    competitor_name: str
 
 @app.post("/download_report")
 async def download_detailed_report(request: ReportRequest):
@@ -178,6 +182,53 @@ async def download_detailed_report(request: ReportRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+class ChatRequest(BaseModel):
+    user_query: str
+
+@app.post("/chat")
+async def deep_dive_chat(request: ChatRequest):
+    """The Interrogation Room: Directly ask questions about the ingested report."""
+    try:
+        print(f"--- Interrogation Room Query: {request.user_query} ---")
+        
+        # 1. Hit the RAG Engine for the specific user question
+        rag_context = retriever.hybrid_search(request.user_query, top_k=3)
+        
+        # 2. Prompt Saul Goodman (using the creative LLM from agents.py)
+        # Note: We import llm_creative from agents at the top of main.py if not already there, 
+        # or just instantiate it here. For safety, let's use the OllamaLLM directly here.
+        from langchain_ollama import OllamaLLM
+        chat_llm = OllamaLLM(model="llama3.2", temperature=0.6)
+        
+        prompt = f"""
+        You are Saul Goodman, the slick, fast-talking, legally-flexible criminal lawyer from Albuquerque. 
+        You are currently acting as a slightly shady but brilliant financial advisor for the user.
+        
+        CRITICAL RULES FOR YOUR PERSONA:
+        1. Talk EXACTLY like Saul Goodman. Use his catchphrases ("Did you know you have rights?", "My guy", "Let me tell ya", "S'all good, man").
+        2. Use sleazy but clever metaphors (e.g., laser tag arcades, burner phones, slip-and-falls, nail salons, money laundering, dodging the IRS).
+        3. Be highly charismatic, slightly unhinged, but ultimately give mathematically sound and brutal financial advice based STRICTLY on the provided report context.
+        4. If the answer isn't in the context, pitch them on a completely unrelated, slightly shady tax loophole instead, and tell them to call your burner phone.
+        
+        MANDATORY CITATIONS: You must cite the [SOURCE: Page X] in your response so the SEC doesn't come after us.
+        
+        REPORT CONTEXT:
+        ---
+        {rag_context}
+        ---
+        
+        USER QUESTION: "{request.user_query}"
+        """
+        
+        response = chat_llm.invoke(prompt)
+        
+        return {"response": response.strip(), "sources_used": rag_context}
+        
+    except Exception as e:
+        print(f"ERROR in /chat: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/scenario")
 async def analyze_scenario(request: ScenarioRequest):
     try:
@@ -197,15 +248,37 @@ async def analyze_scenario(request: ScenarioRequest):
 
 @app.post("/benchmark")
 async def analyze_benchmark(request: BenchmarkRequest):
+    """Feature 5: Cross-Company Benchmarking."""
     try:
         initial_state = AgentState(
             company_name=request.company_name,
-            cleaned_data=request.cleaned_data
+            cleaned_data=request.cleaned_data,
+            user_query=request.competitor_name  # Pass the competitor name to the agent
         )
-        print("--- Invoking Benchmark Agent ---")
+        print(f"--- Invoking Benchmark Agent for {request.company_name} vs {request.competitor_name} ---")
         final_state = benchmark_app.invoke(initial_state)
+        
         return {"response": final_state.get('benchmark_analysis', 'Could not process benchmark analysis.')}
     except Exception as e:
         print(f"ERROR in /benchmark: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+class ComplianceRequest(BaseModel):
+    company_name: str
+
+@app.post("/compliance")
+async def run_compliance_check(request: ComplianceRequest):
+    """Feature 4: Automated SEC/Compliance Risk Flagging."""
+    try:
+        initial_state = AgentState(company_name=request.company_name)
+        print("--- Invoking Compliance Agent ---")
+        
+        # This triggers the standalone SEC agent workflow
+        final_state = compliance_app.invoke(initial_state)
+        
+        return {"compliance_alerts": final_state.get('analysis_context', 'No compliance data extracted.')}
+    except Exception as e:
+        print(f"ERROR in /compliance: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
