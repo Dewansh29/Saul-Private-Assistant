@@ -12,9 +12,9 @@ Upload a financial document and watch three AI personas — an **Optimist CEO**,
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 19, Vite, TailwindCSS, Axios, React Router |
+| **Frontend** | React 19, Vite, CSS Modules, Axios, React Router |
 | **Backend** | Python, FastAPI, Uvicorn |
-| **AI Core** | Google Gemini 2.5 Flash Lite |
+| **AI Core** | Google Gemini 2.5 Flash Lite, Ollama (Llama 3.2), LangChain |
 | **Orchestration** | LangGraph (multi-agent state machine) |
 | **Data Processing** | Pandas, PyMuPDF, Camelot, OpenPyXL |
 | **Report Export** | python-docx (Word `.docx` download) |
@@ -69,6 +69,7 @@ Benchmark Agent (Industry comparison)
 - [Python 3.10+](https://www.python.org/downloads/)
 - [Node.js 18+](https://nodejs.org/)
 - A **Gemini API Key** — get one free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- [Ollama](https://ollama.com/) installed locally. After installing, run `ollama pull llama3.2` to download the required LLM for the local agents.
 
 ---
 
